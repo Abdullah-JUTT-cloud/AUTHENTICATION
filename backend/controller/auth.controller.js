@@ -1,7 +1,8 @@
 import User from "../models/user.model.js";
 import bcrypt from "bcryptjs";
+import crypto from "crypto";
 import generateTokenAndSetCookie from "../utils/generateTokenAndSetCookie.js";
-import { sendVerificationEmail, sendWelcomeEmail } from "../mailTrap/emails.js";
+import { sendVerificationEmail, sendWelcomeEmail,sendPasswordResetEmail } from "../mailTrap/emails.js";
 
 
 export const signup = async (req, res) => {
@@ -72,8 +73,57 @@ export const verify = async (req, res) => {
 }
 
 export const login = async (req, res) => {
-    res.send("login");
+    const {email,password}=req.body;
+    try {
+        if(!email || !password){
+            throw new Error("All fields are required");
+        }
+        const user=await User.findOne({email});
+        if(!user){
+            return res.status(400).json({success:false,message:"User not found"});
+        }
+        const isPasswordValid=await bcrypt.compare(password,user.password);
+        if(!isPasswordValid){
+            return res.status(400).json({success:false,message:"Invalid credentials"});
+        }
+        generateTokenAndSetCookie(res,user._id);
+        user.lastLoginAt=Date.now();
+        await user.save();
+        res.status(200).json({
+            success:true,
+            message:"Login successfully",
+            user:{
+                ...user._doc,
+                password:undefined
+            }
+        });
+    } catch (error) {
+        console.log("Error in login controller",error);
+        res.status(400).json({success:false,message:error.message});
+    }
 }
+
+export const forgotPassword = async (req, res) => {
+    const {email}=req.body;
+    try {
+        const user=await User.findOne({email});
+     if(!user){
+        return res.status(400).json({success:false,message:"User not found"});
+     }   
+     const resetToken=crypto.randomBytes(32).toString("hex");
+     const resetTokenExpiresAt=Date.now()+1*60*60*1000;
+     user.resetPasswordToken=resetToken;
+     user.resetPasswordExpiresAt=resetTokenExpiresAt;
+     await user.save();
+     await sendPasswordResetEmail(email,`${process.env.CLIENT_URL}/reset-password/${resetToken}`);
+     res.status(200).json({success:true,message:"Password reset email sent successfully"});
+    } catch (error) {
+        console.log("Error in forgot password controller",error);
+        res.status(400).json({success:false,message:error.message});
+    }
+}
+
 export const logout = async (req, res) => {
-    res.send("logout");
+   res.clearCookie("token");
+   res.status(200).json({success:true,message:"Logout successfully"});
 }
